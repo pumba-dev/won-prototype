@@ -3,19 +3,24 @@
     <!-- Header -->
     <a-layout-header class="session__header">
       <div class="header__item">
-        <img src="../assets/wireless-network.png" />
-        <span> Wireless Optical Network - WON </span>
+        <img src="../assets/wireless-network.png" alt="WON Logo" />
+        <span class="header__title">Wireless Optical Network</span>
+        <span class="header__title--short">WON</span>
       </div>
 
       <div class="header__item">
-        <a-button>
-          <a href="https://www.pumbadev.com">Contact</a>
+        <a-button size="small">
+          <a href="https://www.pumbadev.com" target="_blank" rel="noopener">
+            Contato
+          </a>
         </a-button>
-        <a-button>
+        <a-button size="small" class="header__repo-btn">
           <a
             href="https://github.com/pumba-dev/wireless-optical-network-prototype"
+            target="_blank"
+            rel="noopener"
           >
-            Repository
+            Repositório
           </a>
         </a-button>
       </div>
@@ -28,11 +33,12 @@
 
     <!-- Footer -->
     <a-layout-footer class="session__footer">
-      <a-button type="tertiary">
-        <a href="www.pumbadev.com">
-          WON Prototype © 2023 Created by Pumba Developer
+      <span>
+        WON Prototype © 2023 ·
+        <a href="https://www.pumbadev.com" target="_blank" rel="noopener">
+          Pumba Developer
         </a>
-      </a-button>
+      </span>
     </a-layout-footer>
   </a-layout>
 </template>
@@ -44,8 +50,7 @@ import MainContent from "./MainContent.vue";
 <style scoped lang="scss">
 .main-session {
   width: 100%;
-  height: 100vh;
-
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
 
@@ -53,38 +58,73 @@ import MainContent from "./MainContent.vue";
     display: flex;
     align-items: center;
     justify-content: space-between;
-
     background-color: #2e5eaa;
+    padding: 0 20px;
 
     .header__item {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
 
     img {
-      width: 50px;
-      height: 50px;
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
     }
 
-    span {
-      font-size: 1.5rem;
+    .header__title {
+      font-size: 1.25rem;
       font-weight: bold;
-      margin-left: 10px;
+      color: white;
+      white-space: nowrap;
+    }
+
+    .header__title--short {
+      display: none;
+      font-size: 1.25rem;
+      font-weight: bold;
       color: white;
     }
   }
 
   .session__footer {
     width: 100%;
-
     display: flex;
     align-items: center;
     justify-content: center;
+    text-align: center;
+    font-size: 0.8rem;
 
     a {
       &:hover {
         text-decoration: underline;
+      }
+    }
+  }
+
+  @media (max-width: 600px) {
+    .session__header {
+      padding: 0 12px;
+      height: 52px;
+      line-height: 52px;
+
+      img {
+        width: 30px;
+        height: 30px;
+      }
+
+      .header__title {
+        display: none;
+      }
+
+      .header__title--short {
+        display: inline;
+        font-size: 1.1rem;
+      }
+
+      .header__repo-btn {
+        display: none;
       }
     }
   }
