@@ -40,7 +40,7 @@ export class PhysicalLayer {
   static readonly BIT_0_COLOR = "#FF0000"; // Vermelho → bit 0
   static readonly BIT_1_COLOR = "#00FF00"; // Verde    → bit 1
   static readonly BORDER_SIZE = 35; // Largura da borda de guarda (px)
-  static readonly COLOR_THRESHOLD = 150; // Limiar RGB para detecção de cor
+  static readonly COLOR_THRESHOLD = 125; // Limiar RGB para detecção de cor
   static readonly KERNEL_SIZE = 4; // Tamanho do kernel do filtro mediana
   static readonly PRE_PROCESS = true; // Aplica filtro antes da detecção
 
@@ -53,7 +53,7 @@ export class PhysicalLayer {
   constructor() {
     this.worker = new Worker(
       new URL("../workers/pixelProcessor.worker.ts", import.meta.url),
-      { type: "module" }
+      { type: "module" },
     );
 
     this.worker.onmessage = (e: MessageEvent<ProcessResponse>) => {
@@ -84,7 +84,7 @@ export class PhysicalLayer {
    */
   drawDataSymbol(modulation: number, bits: number[]): void {
     const canvas = document.getElementById(
-      "transmitter-symbol"
+      "transmitter-symbol",
     ) as HTMLCanvasElement | null;
     const container = document.getElementById("body__transmitter");
     if (!canvas || !container) return;
@@ -133,7 +133,7 @@ export class PhysicalLayer {
    */
   drawControlSymbol(color: string): void {
     const canvas = document.getElementById(
-      "transmitter-symbol"
+      "transmitter-symbol",
     ) as HTMLCanvasElement | null;
     const container = document.getElementById("body__transmitter");
     if (!canvas || !container) return;
@@ -184,7 +184,7 @@ export class PhysicalLayer {
    */
   captureFrame(
     videoElem: HTMLVideoElement,
-    coord?: CropCoord
+    coord?: CropCoord,
   ): ImageData | null {
     const x = coord?.x ?? 0;
     const y = coord?.y ?? 0;

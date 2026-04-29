@@ -4,6 +4,7 @@ import { LinkLayer } from "../layers/LinkLayer";
 import type { DataFrame } from "../layers/LinkLayer";
 import { PhysicalLayer } from "../layers/PhysicalLayer";
 import type { CropCoord } from "../layers/PhysicalLayer";
+import type { RxLogEvent } from "../interfaces/RxLogEvent";
 
 /**
  * WONService — Orquestrador do protocolo WON
@@ -54,7 +55,8 @@ export default class WONService {
    */
   public static async startModulation(
     payload: string,
-    modulation: string
+    modulation: string,
+    onProgress?: (current: number, total: number) => void
   ): Promise<void> {
     const bitsPerSymbol = parseInt(modulation, 10);
 
@@ -69,8 +71,10 @@ export default class WONService {
 
     while (WONService.moduRunning) {
       // Enlace → Física: transmite cada quadro com temporização
-      for (const frame of frames) {
+      for (let i = 0; i < frames.length; i++) {
         if (!WONService.moduRunning) break;
+
+        const frame = frames[i];
 
         if (frame.type === "data") {
           WONService.physical.drawDataSymbol(
@@ -83,6 +87,7 @@ export default class WONService {
           );
         }
 
+        onProgress?.(i + 1, frames.length);
         await sleep(LinkLayer.SYMBOL_LIFE_MS);
       }
 
@@ -105,11 +110,13 @@ export default class WONService {
   public static async startDemodulation(
     modulation: number,
     videoElem: HTMLVideoElement | null,
-    signalCoord: CropCoord
+    signalCoord: CropCoord,
+    onEvent?: (event: RxLogEvent) => void
   ): Promise<string | undefined> {
     if (!videoElem) return undefined;
 
     WONService.demoRunning = true;
+    const startTime = Date.now();
 
     // Enlace: inicializa máquina de estados do receptor
     let rxState = WONService._link.createRxState();
@@ -125,9 +132,8 @@ export default class WONService {
 
       const result = await WONService.physical.processFrame(frame);
 
-      console.log("Center Color:", result.centerColor);
-
       // Enlace: atualiza máquina de estados com o símbolo recebido
+      const prevBitCount = rxState.collectedBits.length;
       rxState = WONService._link.processReceivedSymbol(
         result.centerColor,
         result.rectangleColors,
@@ -135,7 +141,30 @@ export default class WONService {
         modulation
       );
 
-      if (rxState.done) break;
+      // Emite evento de sinal sempre que uma cor é detectada
+      if (result.centerColor !== null) {
+        const bitsAdded = rxState.collectedBits.length > prevBitCount;
+        onEvent?.({
+          type: bitsAdded ? "bits" : "signal",
+          timestamp: Date.now() - startTime,
+          color: result.centerColor,
+          bits: bitsAdded ? result.rectangleColors : undefined,
+          allBits: [...rxState.collectedBits],
+          partialMessage: WONService._transport.decode(
+            WONService._link.assembleBits(rxState.collectedBits)
+          ),
+        });
+      }
+
+      if (rxState.done) {
+        onEvent?.({
+          type: "signal",
+          timestamp: Date.now() - startTime,
+          color: "white",
+          allBits: [...rxState.collectedBits],
+        });
+        break;
+      }
 
       await sleep(LinkLayer.SYMBOL_LIFE_MS / 4);
     }
@@ -145,7 +174,16 @@ export default class WONService {
     // Enlace → Transporte → Aplicação
     const bitsString = WONService._link.assembleBits(rxState.collectedBits);
     const decoded = WONService._transport.decode(bitsString);
-    return WONService._app.formatReceivedMessage(decoded);
+    const finalMessage = WONService._app.formatReceivedMessage(decoded);
+
+    onEvent?.({
+      type: "decode",
+      timestamp: Date.now() - startTime,
+      allBits: [...rxState.collectedBits],
+      partialMessage: finalMessage,
+    });
+
+    return finalMessage;
   }
 
   // ── Câmera ────────────────────────────────────────────────────────────────

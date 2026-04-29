@@ -70,6 +70,13 @@
         </a-form-item>
 
         <a-form-item>
+          <a-button block size="large" @click="showStats = true">
+            <template #icon><BarChartOutlined /></template>
+            Ver Estatísticas de Transmissão
+          </a-button>
+        </a-form-item>
+
+        <a-form-item>
           <a-button
             type="primary"
             block
@@ -81,6 +88,43 @@
           </a-button>
         </a-form-item>
       </a-form>
+
+      <!-- Modal de estatísticas -->
+      <a-modal
+        v-model:open="showStats"
+        title="Estatísticas de Transmissão"
+        :footer="null"
+      >
+        <a-descriptions :column="1" size="small" bordered>
+          <a-descriptions-item label="Mensagem">
+            {{ dataForm.payload || '—' }}
+          </a-descriptions-item>
+          <a-descriptions-item label="Bits por símbolo">
+            {{ txStats.bitsPerSymbol }}
+          </a-descriptions-item>
+          <a-descriptions-item label="Total de bits">
+            {{ txStats.totalBits }}
+          </a-descriptions-item>
+          <a-descriptions-item label="Quadros de dados">
+            {{ txStats.dataFrames }}
+          </a-descriptions-item>
+          <a-descriptions-item label="Quadros de controle">
+            {{ txStats.controlFrames }}
+          </a-descriptions-item>
+          <a-descriptions-item label="Total de quadros">
+            {{ txStats.totalFrames }}
+          </a-descriptions-item>
+          <a-descriptions-item label="Tempo por quadro">
+            {{ txStats.timePerFrameMs }} ms
+          </a-descriptions-item>
+          <a-descriptions-item label="Tempo estimado">
+            {{ txStats.estimatedTimeSec }} s
+          </a-descriptions-item>
+          <a-descriptions-item label="Binário">
+            <span class="stats__binary">{{ txStats.binaryPreview }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+      </a-modal>
     </div>
 
     <!-- Demodulation (Receiver) -->
@@ -131,7 +175,9 @@
           @click="handleSignalSyncClick"
           @touchstart.prevent="handleSignalSyncTouch"
           class="video__sync-canvas"
-          :class="{ 'video__sync-canvas--active': demodulationData.state === 'sync' }"
+          :class="{
+            'video__sync-canvas--active': demodulationData.state === 'sync',
+          }"
         ></canvas>
         <canvas
           width="640"
@@ -141,7 +187,10 @@
         ></canvas>
 
         <!-- Sync points indicator -->
-        <div class="video__points-badge" v-if="demodulationData.state === 'sync'">
+        <div
+          class="video__points-badge"
+          v-if="demodulationData.state === 'sync'"
+        >
           {{ demodulationData.points.length }}/2 pontos
         </div>
       </div>
@@ -149,7 +198,9 @@
       <!-- Result / Output -->
       <div
         class="demodulation__text"
-        :class="{ 'demodulation__text--result': demodulationData.state === 'finished' }"
+        :class="{
+          'demodulation__text--result': demodulationData.state === 'finished',
+        }"
       >
         <LoadingOutlined
           v-if="demodulationData.state === 'running'"
@@ -158,7 +209,9 @@
         <template v-else-if="demodulationData.state === 'finished'">
           <CheckCircleFilled class="result-icon" />
           <span class="result-label">Mensagem recebida</span>
-          <span class="result-text">{{ demodulationData.output || '(sem conteúdo)' }}</span>
+          <span class="result-text">{{
+            demodulationData.output || "(sem conteúdo)"
+          }}</span>
         </template>
         <template v-else>
           <span class="placeholder-text" v-if="!demodulationData.output">
@@ -167,6 +220,83 @@
           <span v-else>{{ demodulationData.output }}</span>
         </template>
       </div>
+
+      <!-- RX Log Panel -->
+      <div
+        class="demodulation__log"
+        v-if="
+          demodulationData.state === 'running' ||
+          demodulationData.state === 'finished'
+        "
+      >
+        <a-collapse v-model:activeKey="rxLogActiveKey" :bordered="false">
+          <!-- Sinais Detectados -->
+          <a-collapse-panel key="signals" header="Sinais Detectados">
+            <div class="log__signals" ref="signalsContainer">
+              <div
+                v-for="(event, i) in rxLog.events"
+                :key="i"
+                class="log__signal-item"
+                :class="getSignalClass(event.color)"
+              >
+                <span class="signal__time"
+                  >[{{ formatTime(event.timestamp) }}]</span
+                >
+                <span
+                  class="signal__dot"
+                  :class="getSignalClass(event.color)"
+                ></span>
+                <span class="signal__label">{{ getSignalLabel(event) }}</span>
+                <span
+                  class="signal__bits"
+                  v-if="event.bits && event.bits.length"
+                >
+                  → [{{ event.bits.join(", ") }}]
+                </span>
+              </div>
+              <div v-if="rxLog.events.length === 0" class="log__empty">
+                Aguardando sinais...
+              </div>
+            </div>
+          </a-collapse-panel>
+
+          <!-- Bits Reconstruídos -->
+          <a-collapse-panel key="bits" header="Bits Reconstruídos">
+            <div class="log__bytes">
+              <div
+                v-for="(byte, i) in rxByteGroups"
+                :key="i"
+                class="log__byte-item"
+                :class="{ 'log__byte-item--partial': !byte.complete }"
+              >
+                <span class="byte__bits">{{ byte.bitsStr }}</span>
+                <span class="byte__arrow">→</span>
+                <span class="byte__char" v-if="byte.complete"
+                  >'{{ byte.char }}'</span
+                >
+                <span class="byte__partial" v-else>(parcial…)</span>
+              </div>
+              <div v-if="rxByteGroups.length === 0" class="log__empty">
+                Nenhum bit coletado ainda.
+              </div>
+            </div>
+          </a-collapse-panel>
+
+          <!-- Mensagem sendo decodificada -->
+          <a-collapse-panel key="message" header="Mensagem sendo decodificada">
+            <div class="log__message">
+              <span class="message__text">{{
+                rxLog.partialMessage || "…"
+              }}</span>
+              <span
+                class="message__cursor"
+                v-if="demodulationData.state === 'running'"
+                >█</span
+              >
+            </div>
+          </a-collapse-panel>
+        </a-collapse>
+      </div>
     </div>
   </div>
 </template>
@@ -174,16 +304,29 @@
 <script setup lang="ts">
 import ModulationModal from "./ModulationModal.vue";
 
-import { ref, reactive, toRaw, onMounted, h } from "vue";
+import {
+  ref,
+  reactive,
+  computed,
+  toRaw,
+  onMounted,
+  nextTick,
+  watch,
+  h,
+} from "vue";
 import {
   PlayCircleOutlined,
   ReloadOutlined,
   LoadingOutlined,
   CheckCircleFilled,
+  BarChartOutlined,
 } from "@ant-design/icons-vue";
 
 import IConnectionData from "../interfaces/IConnectionData";
+import type { RxLogEvent } from "../interfaces/RxLogEvent";
 import WONService from "../services/WONService";
+import { TransportLayer } from "../layers/TransportLayer";
+import { LinkLayer } from "../layers/LinkLayer";
 
 onMounted(() => {
   WONService.startVideoRecording(videoElem.value);
@@ -199,6 +342,37 @@ const videoCanvas = ref<HTMLCanvasElement | null>(null);
 const dataForm = reactive<IConnectionData>({
   modulation: "2",
   payload: "",
+});
+
+const showStats = ref(false);
+
+const txStats = computed(() => {
+  const bitsPerSymbol = parseInt(dataForm.modulation, 10);
+  const transport = new TransportLayer();
+  const link = new LinkLayer();
+  const bits = dataForm.payload ? transport.encode(dataForm.payload) : "";
+  const frames = bits ? link.buildFrameSequence(bits, bitsPerSymbol) : [];
+  const dataFrames = frames.filter((f) => f.type === "data").length;
+  const controlFrames = frames.length - dataFrames;
+  const timePerFrameMs = LinkLayer.SYMBOL_LIFE_MS;
+  const estimatedTimeSec = ((frames.length * timePerFrameMs) / 1000).toFixed(1);
+
+  const bytes: string[] = [];
+  for (let i = 0; i < bits.length && i < 64; i += 8) {
+    bytes.push(bits.slice(i, i + 8));
+  }
+  const binaryPreview = bytes.join(" ") + (bits.length > 64 ? " ..." : "");
+
+  return {
+    bitsPerSymbol,
+    totalBits: bits.length,
+    dataFrames,
+    controlFrames,
+    totalFrames: frames.length,
+    timePerFrameMs,
+    estimatedTimeSec,
+    binaryPreview,
+  };
 });
 
 const modulationModal = reactive({
@@ -223,12 +397,85 @@ const demodulationData = reactive({
   state: "sync" as "sync" | "running" | "finished",
 });
 
+const rxLogActiveKey = ref<string[]>(["signals", "bits", "message"]);
+const signalsContainer = ref<HTMLDivElement | null>(null);
+
+const rxLog = reactive({
+  events: [] as RxLogEvent[],
+  allBits: [] as number[],
+  partialMessage: "",
+});
+
+const MAX_LOG_EVENTS = 80;
+
+const rxByteGroups = computed(() => {
+  const groups: { bitsStr: string; char: string; complete: boolean }[] = [];
+  for (let i = 0; i < rxLog.allBits.length; i += 8) {
+    const chunk = rxLog.allBits.slice(i, i + 8);
+    const complete = chunk.length === 8;
+    const bitsStr = chunk.join("").padEnd(8, "_");
+    const char = complete
+      ? String.fromCharCode(parseInt(chunk.join(""), 2))
+      : "";
+    groups.push({ bitsStr, char, complete });
+  }
+  return groups;
+});
+
+watch(
+  () => rxLog.events.length,
+  async () => {
+    await nextTick();
+    if (signalsContainer.value) {
+      signalsContainer.value.scrollTop = signalsContainer.value.scrollHeight;
+    }
+  },
+);
+
+function onRxEvent(event: RxLogEvent) {
+  if (event.type === "signal" || event.type === "bits") {
+    rxLog.events.push(event);
+    if (rxLog.events.length > MAX_LOG_EVENTS) {
+      rxLog.events.splice(0, rxLog.events.length - MAX_LOG_EVENTS);
+    }
+  }
+  if (event.allBits) {
+    rxLog.allBits = [...event.allBits];
+  }
+  if (event.partialMessage !== undefined) {
+    rxLog.partialMessage = event.partialMessage;
+  }
+}
+
+function formatTime(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const msRem = ms % 1000;
+  return `${String(s).padStart(2, "0")}:${String(msRem).padStart(3, "0")}`;
+}
+
+function getSignalLabel(event: RxLogEvent): string {
+  if (event.type === "decode") return "Decodificação concluída";
+  const color = event.color;
+  if (color === "blue") return "GUARD (Azul) — aguardando próximo símbolo";
+  if (color === "white") return "FIM (Branco) — transmissão encerrada";
+  if (color === "red") return "DADO (Vermelho) — bit 0";
+  if (color === "green") return "DADO (Verde) — bit 1";
+  return `Sinal: ${color ?? "desconhecido"}`;
+}
+
+function getSignalClass(color?: string | null): string {
+  if (color === "blue") return "signal--guard";
+  if (color === "white") return "signal--end";
+  if (color === "red" || color === "green") return "signal--data";
+  return "";
+}
+
 function getDemodulationStateLabel() {
   switch (demodulationData.state) {
     case "sync":
       return demodulationData.points.length < 2
         ? "Toque na diagonal da tela do transmissor para enquadrar o sinal (2 pontos)."
-        : "Pontos selecionados. Clique em \"Iniciar Demodulação\".";
+        : 'Pontos selecionados. Clique em "Iniciar Demodulação".';
     case "running":
       return "Reconhecimento de símbolos em andamento…";
     case "finished":
@@ -254,11 +501,15 @@ async function onStartTransmission() {
 
 async function handleStartDemodule() {
   demodulationData.state = "running";
+  rxLog.events = [];
+  rxLog.allBits = [];
+  rxLog.partialMessage = "";
 
   WONService.startDemodulation(
     Number(dataForm.modulation),
     videoElem.value,
-    calcCoordByPoints()
+    calcCoordByPoints(),
+    onRxEvent,
   )
     .then((output) => {
       demodulationData.state = "finished";
@@ -273,6 +524,9 @@ async function handleStartDemodule() {
 function handleResetDemodule() {
   demodulationData.state = "sync";
   demodulationData.output = "";
+  rxLog.events = [];
+  rxLog.allBits = [];
+  rxLog.partialMessage = "";
   WONService.demoRunning = false;
   handleClearSyncPoints();
 }
@@ -295,10 +549,18 @@ function calcCoordByPoints(): {
   const width = Math.max(p1.x, p2.x, p3.x, p4.x) - x;
   const height = Math.max(p1.y, p2.y, p3.y, p4.y) - y;
 
-  return { x: Number(x), y: Number(y), width: Number(width), height: Number(height) };
+  return {
+    x: Number(x),
+    y: Number(y),
+    width: Number(width),
+    height: Number(height),
+  };
 }
 
-function getScaledCoords(clientX: number, clientY: number): { x: number; y: number } {
+function getScaledCoords(
+  clientX: number,
+  clientY: number,
+): { x: number; y: number } {
   if (!syncCanvas.value) return { x: 0, y: 0 };
 
   const rect = syncCanvas.value.getBoundingClientRect();
@@ -355,15 +617,26 @@ const drawRectangle = () => {
 
   const [point1, point2] = demodulationData.points;
 
-  const topLeft = { x: Math.min(point1.x, point2.x), y: Math.min(point1.y, point2.y) };
-  const bottomRight = { x: Math.max(point1.x, point2.x), y: Math.max(point1.y, point2.y) };
+  const topLeft = {
+    x: Math.min(point1.x, point2.x),
+    y: Math.min(point1.y, point2.y),
+  };
+  const bottomRight = {
+    x: Math.max(point1.x, point2.x),
+    y: Math.max(point1.y, point2.y),
+  };
   const topRight = { x: bottomRight.x, y: topLeft.y };
   const bottomLeft = { x: topLeft.x, y: bottomRight.y };
 
   // Shaded overlay outside the selection
   context.fillStyle = "rgba(0,0,0,0.35)";
   context.fillRect(0, 0, syncCanvas.value.width, syncCanvas.value.height);
-  context.clearRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+  context.clearRect(
+    topLeft.x,
+    topLeft.y,
+    bottomRight.x - topLeft.x,
+    bottomRight.y - topLeft.y,
+  );
 
   // Red border
   context.strokeStyle = "#ff4d4f";
@@ -392,8 +665,14 @@ const drawRectangle = () => {
 const getRectangleVertices = () => {
   const [point1, point2] = demodulationData.points;
 
-  const topLeft = { x: Math.min(point1.x, point2.x), y: Math.min(point1.y, point2.y) };
-  const bottomRight = { x: Math.max(point1.x, point2.x), y: Math.max(point1.y, point2.y) };
+  const topLeft = {
+    x: Math.min(point1.x, point2.x),
+    y: Math.min(point1.y, point2.y),
+  };
+  const bottomRight = {
+    x: Math.max(point1.x, point2.x),
+    y: Math.max(point1.y, point2.y),
+  };
   const topRight = { x: bottomRight.x, y: topLeft.y };
   const bottomLeft = { x: topLeft.x, y: bottomRight.y };
 
@@ -547,6 +826,129 @@ const getRectangleVertices = () => {
     }
   }
 
+  .demodulation__log {
+    width: 100%;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    overflow: hidden;
+
+    .log__signals {
+      max-height: 200px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.78rem;
+      font-family: monospace;
+    }
+
+    .log__signal-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 6px;
+      border-radius: 4px;
+      background: #fafafa;
+
+      .signal__time {
+        color: #999;
+        flex-shrink: 0;
+      }
+
+      .signal__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        background: #ccc;
+
+        &.signal--guard {
+          background: #1677ff;
+        }
+        &.signal--end {
+          background: #888;
+          border: 1px solid #ccc;
+        }
+        &.signal--data {
+          background: #52c41a;
+        }
+      }
+
+      .signal__label {
+        color: #444;
+        flex: 1;
+      }
+
+      .signal__bits {
+        color: #52c41a;
+        flex-shrink: 0;
+      }
+    }
+
+    .log__bytes {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.78rem;
+      font-family: monospace;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+
+    .log__byte-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 6px;
+      background: #fafafa;
+      border-radius: 4px;
+
+      .byte__bits {
+        color: #1677ff;
+        letter-spacing: 0.05em;
+      }
+
+      .byte__arrow {
+        color: #aaa;
+      }
+
+      .byte__char {
+        color: #389e0d;
+        font-weight: bold;
+      }
+
+      .byte__partial {
+        color: #bbb;
+        font-style: italic;
+      }
+
+      &--partial {
+        opacity: 0.6;
+      }
+    }
+
+    .log__message {
+      font-family: monospace;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #1a1a1a;
+      word-break: break-all;
+      letter-spacing: 0.03em;
+
+      .message__cursor {
+        animation: blink 1s step-end infinite;
+        color: #1677ff;
+      }
+    }
+
+    .log__empty {
+      color: #bbb;
+      font-style: italic;
+      font-size: 0.78rem;
+      padding: 4px 0;
+    }
+  }
+
   @media (max-width: 600px) {
     padding: 16px 12px;
     gap: 16px;
@@ -560,6 +962,16 @@ const getRectangleVertices = () => {
         font-size: 0.85rem;
       }
     }
+  }
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
   }
 }
 </style>
