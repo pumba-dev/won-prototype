@@ -1,3 +1,14 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
 .ant-segmented {
   background-color: #6f97d8;
 
@@ -5,4 +16,21 @@
     color: #242424;
     font-weight: 500;
   }
+}
+
+// Ant Design layout fills full height
+.ant-layout {
+  min-height: 100vh;
+}
+
+.ant-layout-content {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+// Prevent text selection on canvas interactions
+canvas {
+  user-select: none;
+  -webkit-user-select: none;
 }
