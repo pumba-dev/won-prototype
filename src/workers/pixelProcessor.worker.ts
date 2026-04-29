@@ -38,8 +38,16 @@ self.onmessage = (event: MessageEvent<ProcessRequest>) => {
   (self as unknown as DedicatedWorkerGlobalScope).postMessage(response);
 };
 
-// ─── Noise Reduction ─────────────────────────────────────────────────────────
-
+/**
+ * Aplica filtro de mediana para remover ruído sal-e-pimenta da imagem.
+ *
+ * Pixels pretos (bordas de guarda) são preservados sem alteração e excluídos
+ * da vizinhança do kernel — impede que marcadores de borda corrompam a mediana
+ * dos pixels de informação adjacentes.
+ *
+ * @param kernelSize - Lado da janela quadrada (ex.: 4 → kernel 5×5 centrado)
+ * @param blackThreshold - Limiar: pixel com R, G e B abaixo deste valor é preto
+ */
 function removeSaltAndPepperNoise(
   imageData: ImageData,
   kernelSize: number,
@@ -54,7 +62,6 @@ function removeSaltAndPepperNoise(
       const base = (y * width + x) * 4;
       const pr = data[base], pg = data[base + 1], pb = data[base + 2];
 
-      // Black pixels are guard/border markers — preserve them as-is.
       if (pr < blackThreshold && pg < blackThreshold && pb < blackThreshold) continue;
 
       const rVals: number[] = [];
@@ -68,7 +75,6 @@ function removeSaltAndPepperNoise(
           if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
             const idx = (ny * width + nx) * 4;
             const nr = data[idx], ng = data[idx + 1], nb = data[idx + 2];
-            // Exclude black neighbors so border pixels don't corrupt the median.
             if (nr < blackThreshold && ng < blackThreshold && nb < blackThreshold) continue;
             rVals.push(nr);
             gVals.push(ng);
@@ -89,6 +95,7 @@ function removeSaltAndPepperNoise(
   return new ImageData(output, width, height);
 }
 
+/** Retorna a mediana de um array de valores numéricos. */
 function median(values: number[]): number {
   values.sort((a, b) => a - b);
   const mid = Math.floor(values.length / 2);
@@ -97,7 +104,12 @@ function median(values: number[]): number {
     : values[mid];
 }
 
-// Remove top and bottom `trim` fraction of values before averaging to eliminate outliers.
+/**
+ * Calcula a média aparada de um array, descartando as frações mais baixa e
+ * mais alta antes de calcular a média — elimina outliers sem perder a amostra.
+ *
+ * @param trim - Fração descartada de cada extremidade (ex.: 0.1 = 10%)
+ */
 function trimmedMean(values: number[], trim: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -107,8 +119,20 @@ function trimmedMean(values: number[], trim: number): number {
   return src.reduce((s, v) => s + v, 0) / src.length;
 }
 
-// ─── Center Color Detection ──────────────────────────────────────────────────
-
+/**
+ * Detecta a cor dominante na região central da imagem.
+ *
+ * Amostra uma janela proporcional ao frame (raio mínimo de 10 px, até 5% da
+ * menor dimensão), calcula a média aparada por canal e classifica:
+ *
+ * - `"white"`  — todos os canais acima do threshold E desequilíbrio < 40.
+ *               O limite de equilíbrio evita que cores sobreexpostas (ex.:
+ *               vermelho brilhante R=255, G=200, B=200, diff=55) sejam
+ *               confundidas com branco.
+ * - `"black"`  — todos os canais abaixo do threshold
+ * - `"red"` / `"green"` / `"blue"` — canal com maior média
+ * - `null`     — cor ambígua, nenhum canal claramente dominante
+ */
 function detectCenterColor(
   imageData: ImageData,
   threshold: number
@@ -116,7 +140,6 @@ function detectCenterColor(
   const { width, height, data } = imageData;
   const cx = Math.floor(width / 2);
   const cy = Math.floor(height / 2);
-  // Proportional region: at least 10px radius, up to 5% of the shorter dimension.
   const half = Math.max(10, Math.floor(Math.min(width, height) * 0.05));
 
   const rVals: number[] = [];
@@ -140,9 +163,6 @@ function detectCenterColor(
   const g = trimmedMean(gVals, 0.1);
   const b = trimmedMean(bVals, 0.1);
 
-  // "White" requires all channels above threshold AND balanced (max−min < 40).
-  // This prevents overexposed colors (e.g. bright red r=255,g=200,b=200, diff=55)
-  // from being misclassified as white.
   const channelBalance = Math.max(r, g, b) - Math.min(r, g, b);
   if (r > threshold && g > threshold && b > threshold && channelBalance < 40) return "white";
   if (r < threshold && g < threshold && b < threshold) return "black";
@@ -152,8 +172,18 @@ function detectCenterColor(
   return null;
 }
 
-// ─── Rectangle Detection ─────────────────────────────────────────────────────
-
+/**
+ * Detecta os retângulos coloridos da grade e retorna os bits codificados.
+ *
+ * Varre a imagem faixa a faixa (uma linha de retângulos por iteração).
+ * Para cada retângulo encontrado, coleta todos os pixels do segmento
+ * horizontal e classifica pelo trimmed mean dos canais R e G — elimina
+ * outliers sem depender de um único pixel representativo.
+ *
+ * @returns `rectangleColors` — array de `0` (vermelho) ou `1` (verde)
+ *          na ordem esquerda→direita, cima→baixo, mapeando 1:1 aos bits
+ *          do símbolo transmitido
+ */
 function detectRectangles(
   imageData: ImageData,
   threshold: number
@@ -175,8 +205,6 @@ function detectRectangles(
         continue;
       }
 
-      // Collect ALL pixels in this horizontal colored segment, then classify
-      // by trimmed mean to reject noise outliers (single bright/dark pixels).
       const segR: number[] = [];
       const segG: number[] = [];
 
@@ -187,7 +215,6 @@ function detectRectangles(
         const pb = data[cur + 2];
 
         if (pr < threshold && pg < threshold && pb < threshold) {
-          // Dark border: skip it, then break so the outer while starts the next rectangle.
           while (x < width) {
             const bc = (y * width + x) * 4;
             if (
@@ -213,7 +240,6 @@ function detectRectangles(
         else if (avgG > avgR) rectangleColors.push(1);
       }
 
-      // Advance y to skip the rest of this row band and the border below it.
       if (x >= width) {
         x = 0;
         while (
