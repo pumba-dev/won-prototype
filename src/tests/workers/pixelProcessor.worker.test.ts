@@ -179,6 +179,73 @@ describe('pixelProcessor.worker', () => {
       });
       expect(mockSelf.postMessage.mock.calls[0][0].centerColor).toBe('green');
     });
+
+    it('NÃO detecta "white" para vermelho sobreexposto (canais desequilibrados)', () => {
+      // R=255,G=200,B=200: todos acima do threshold mas não balanceados (diff=55)
+      // Deve ser classificado como "red", não "white"
+      const buffer = makeBuffer(10, 10, buf => {
+        for (let i = 0; i < buf.length; i += 4) {
+          buf[i] = 255;     // R
+          buf[i + 1] = 200; // G
+          buf[i + 2] = 200; // B
+          buf[i + 3] = 255; // A
+        }
+      });
+      callOnMessage({
+        type: 'processFrame',
+        buffer,
+        width: 10,
+        height: 10,
+        kernelSize: 3,
+        colorThreshold: 150,
+        preProcess: false,
+      });
+      expect(mockSelf.postMessage.mock.calls[0][0].centerColor).toBe('red');
+    });
+
+    it('NÃO detecta "white" para verde sobreexposto (canais desequilibrados)', () => {
+      // G=255,R=200,B=200: todos acima do threshold mas não balanceados (diff=55)
+      const buffer = makeBuffer(10, 10, buf => {
+        for (let i = 0; i < buf.length; i += 4) {
+          buf[i] = 200;     // R
+          buf[i + 1] = 255; // G
+          buf[i + 2] = 200; // B
+          buf[i + 3] = 255; // A
+        }
+      });
+      callOnMessage({
+        type: 'processFrame',
+        buffer,
+        width: 10,
+        height: 10,
+        kernelSize: 3,
+        colorThreshold: 150,
+        preProcess: false,
+      });
+      expect(mockSelf.postMessage.mock.calls[0][0].centerColor).toBe('green');
+    });
+
+    it('detecta "white" para branco com ruído leve de câmera (canais equilibrados)', () => {
+      // R=240,G=225,B=220: todos acima do threshold e diff=20 < 40 → "white"
+      const buffer = makeBuffer(10, 10, buf => {
+        for (let i = 0; i < buf.length; i += 4) {
+          buf[i] = 240;     // R
+          buf[i + 1] = 225; // G
+          buf[i + 2] = 220; // B
+          buf[i + 3] = 255; // A
+        }
+      });
+      callOnMessage({
+        type: 'processFrame',
+        buffer,
+        width: 10,
+        height: 10,
+        kernelSize: 3,
+        colorThreshold: 150,
+        preProcess: false,
+      });
+      expect(mockSelf.postMessage.mock.calls[0][0].centerColor).toBe('white');
+    });
   });
 
   describe('detectRectangles', () => {

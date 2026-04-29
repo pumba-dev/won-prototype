@@ -40,7 +40,7 @@ export class PhysicalLayer {
   static readonly BIT_0_COLOR = "#FF0000"; // Vermelho → bit 0
   static readonly BIT_1_COLOR = "#00FF00"; // Verde    → bit 1
   static readonly BORDER_SIZE = 35; // Largura da borda de guarda (px)
-  static readonly COLOR_THRESHOLD = 125; // Limiar RGB para detecção de cor
+  static readonly COLOR_THRESHOLD = 150; // Limiar RGB para detecção de cor
   static readonly KERNEL_SIZE = 4; // Tamanho do kernel do filtro mediana
   static readonly PRE_PROCESS = true; // Aplica filtro antes da detecção
 
@@ -157,6 +157,25 @@ export class PhysicalLayer {
       return;
     }
 
+    const applyExposureCompensation = (stream: MediaStream) => {
+      videoElem.srcObject = stream;
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        // Best-effort: reduce exposure to avoid brightness overexposure.
+        // Not supported on all browsers/devices — errors are silenced.
+        track
+          .applyConstraints({
+            advanced: [
+              {
+                exposureMode: "manual",
+                exposureCompensation: -1,
+              } as MediaTrackConstraintSet,
+            ],
+          })
+          .catch(() => {});
+      }
+    };
+
     navigator.mediaDevices
       .getUserMedia({
         video: {
@@ -165,15 +184,11 @@ export class PhysicalLayer {
           height: { ideal: 480 },
         },
       })
-      .then((stream) => {
-        videoElem.srcObject = stream;
-      })
+      .then(applyExposureCompensation)
       .catch(() => {
         navigator.mediaDevices
           .getUserMedia({ video: true })
-          .then((stream) => {
-            videoElem.srcObject = stream;
-          })
+          .then(applyExposureCompensation)
           .catch((err) => console.error("Erro ao acessar câmera:", err));
       });
   }

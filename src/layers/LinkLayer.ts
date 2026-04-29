@@ -49,7 +49,7 @@ export class LinkLayer {
   // ── Constantes de protocolo ────────────────────────────────────────────────
 
   /** Duração de cada símbolo em milissegundos. */
-  static readonly SYMBOL_LIFE_MS = 1000;
+  static readonly SYMBOL_LIFE_MS = 2000;
 
   /** Cor do quadro de guarda / sync (azul). */
   static readonly GUARD_COLOR = "#0000FF";

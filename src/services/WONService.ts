@@ -69,33 +69,28 @@ export default class WONService {
 
     WONService.moduRunning = true;
 
-    while (WONService.moduRunning) {
-      // Enlace → Física: transmite cada quadro com temporização
-      for (let i = 0; i < frames.length; i++) {
-        if (!WONService.moduRunning) break;
-
-        const frame = frames[i];
-
-        if (frame.type === "data") {
-          WONService.physical.drawDataSymbol(
-            bitsPerSymbol,
-            (frame as DataFrame).bits
-          );
-        } else {
-          WONService.physical.drawControlSymbol(
-            WONService._link.getControlColor(frame.type)
-          );
-        }
-
-        onProgress?.(i + 1, frames.length);
-        await sleep(LinkLayer.SYMBOL_LIFE_MS);
-      }
-
+    // Enlace → Física: transmite cada quadro com temporização
+    for (let i = 0; i < frames.length; i++) {
       if (!WONService.moduRunning) break;
 
-      // Pausa extra após o quadro de fim antes de retransmitir
-      await sleep(LinkLayer.SYMBOL_LIFE_MS * 3);
+      const frame = frames[i];
+
+      if (frame.type === "data") {
+        WONService.physical.drawDataSymbol(
+          bitsPerSymbol,
+          (frame as DataFrame).bits
+        );
+      } else {
+        WONService.physical.drawControlSymbol(
+          WONService._link.getControlColor(frame.type)
+        );
+      }
+
+      onProgress?.(i + 1, frames.length);
+      await sleep(LinkLayer.SYMBOL_LIFE_MS);
     }
+
+    WONService.moduRunning = false;
   }
 
   // ── RX — Recepção ─────────────────────────────────────────────────────────

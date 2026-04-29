@@ -23,7 +23,7 @@ self.onmessage = (event: MessageEvent<ProcessRequest>) => {
   let imageData = new ImageData(new Uint8ClampedArray(buffer), width, height);
 
   if (preProcess) {
-    imageData = removeSaltAndPepperNoise(imageData, kernelSize);
+    imageData = removeSaltAndPepperNoise(imageData, kernelSize, colorThreshold);
   }
 
   const centerColor = detectCenterColor(imageData, colorThreshold);
@@ -42,7 +42,8 @@ self.onmessage = (event: MessageEvent<ProcessRequest>) => {
 
 function removeSaltAndPepperNoise(
   imageData: ImageData,
-  kernelSize: number
+  kernelSize: number,
+  blackThreshold: number
 ): ImageData {
   const { width, height, data } = imageData;
   const output = new Uint8ClampedArray(data);
@@ -50,6 +51,12 @@ function removeSaltAndPepperNoise(
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
+      const base = (y * width + x) * 4;
+      const pr = data[base], pg = data[base + 1], pb = data[base + 2];
+
+      // Black pixels are guard/border markers — preserve them as-is.
+      if (pr < blackThreshold && pg < blackThreshold && pb < blackThreshold) continue;
+
       const rVals: number[] = [];
       const gVals: number[] = [];
       const bVals: number[] = [];
@@ -60,14 +67,18 @@ function removeSaltAndPepperNoise(
           const ny = y + ky;
           if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
             const idx = (ny * width + nx) * 4;
-            rVals.push(data[idx]);
-            gVals.push(data[idx + 1]);
-            bVals.push(data[idx + 2]);
+            const nr = data[idx], ng = data[idx + 1], nb = data[idx + 2];
+            // Exclude black neighbors so border pixels don't corrupt the median.
+            if (nr < blackThreshold && ng < blackThreshold && nb < blackThreshold) continue;
+            rVals.push(nr);
+            gVals.push(ng);
+            bVals.push(nb);
           }
         }
       }
 
-      const base = (y * width + x) * 4;
+      if (rVals.length === 0) continue;
+
       output[base] = median(rVals);
       output[base + 1] = median(gVals);
       output[base + 2] = median(bVals);
@@ -86,6 +97,16 @@ function median(values: number[]): number {
     : values[mid];
 }
 
+// Remove top and bottom `trim` fraction of values before averaging to eliminate outliers.
+function trimmedMean(values: number[], trim: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const cut = Math.floor(sorted.length * trim);
+  const trimmed = sorted.slice(cut, sorted.length - cut);
+  const src = trimmed.length > 0 ? trimmed : sorted;
+  return src.reduce((s, v) => s + v, 0) / src.length;
+}
+
 // ─── Center Color Detection ──────────────────────────────────────────────────
 
 function detectCenterColor(
@@ -95,12 +116,12 @@ function detectCenterColor(
   const { width, height, data } = imageData;
   const cx = Math.floor(width / 2);
   const cy = Math.floor(height / 2);
-  const half = 2; // 5×5 square
+  // Proportional region: at least 10px radius, up to 5% of the shorter dimension.
+  const half = Math.max(10, Math.floor(Math.min(width, height) * 0.05));
 
-  let totalR = 0,
-    totalG = 0,
-    totalB = 0,
-    count = 0;
+  const rVals: number[] = [];
+  const gVals: number[] = [];
+  const bVals: number[] = [];
 
   for (let dy = -half; dy <= half; dy++) {
     for (let dx = -half; dx <= half; dx++) {
@@ -108,19 +129,22 @@ function detectCenterColor(
       const ny = cy + dy;
       if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
         const idx = (ny * width + nx) * 4;
-        totalR += data[idx];
-        totalG += data[idx + 1];
-        totalB += data[idx + 2];
-        count++;
+        rVals.push(data[idx]);
+        gVals.push(data[idx + 1]);
+        bVals.push(data[idx + 2]);
       }
     }
   }
 
-  const r = totalR / count;
-  const g = totalG / count;
-  const b = totalB / count;
+  const r = trimmedMean(rVals, 0.1);
+  const g = trimmedMean(gVals, 0.1);
+  const b = trimmedMean(bVals, 0.1);
 
-  if (r > threshold && g > threshold && b > threshold) return "white";
+  // "White" requires all channels above threshold AND balanced (max−min < 40).
+  // This prevents overexposed colors (e.g. bright red r=255,g=200,b=200, diff=55)
+  // from being misclassified as white.
+  const channelBalance = Math.max(r, g, b) - Math.min(r, g, b);
+  if (r > threshold && g > threshold && b > threshold && channelBalance < 40) return "white";
   if (r < threshold && g < threshold && b < threshold) return "black";
   if (r > g && r > b) return "red";
   if (g > r && g > b) return "green";
@@ -151,69 +175,67 @@ function detectRectangles(
         continue;
       }
 
-      if (r > g && r > b) {
-        rectangleColors.push(0); // Red → bit 0
-      } else if (g > r && g > b) {
-        rectangleColors.push(1); // Green → bit 1
-      } else {
-        x++;
-        continue;
-      }
+      // Collect ALL pixels in this horizontal colored segment, then classify
+      // by trimmed mean to reject noise outliers (single bright/dark pixels).
+      const segR: number[] = [];
+      const segG: number[] = [];
 
-      // Advance past this colored region (skip to next border)
-      let cur = (y * width + x) * 4;
+      while (x < width) {
+        const cur = (y * width + x) * 4;
+        const pr = data[cur];
+        const pg = data[cur + 1];
+        const pb = data[cur + 2];
 
-      while (
-        data[cur] >= threshold ||
-        data[cur + 1] >= threshold ||
-        data[cur + 2] >= threshold
-      ) {
-        x++;
-        if (x >= width) break;
-        cur = (y * width + x) * 4;
-
-        if (
-          data[cur] < threshold &&
-          data[cur + 1] < threshold &&
-          data[cur + 2] < threshold
-        ) {
-          while (
-            x < width &&
-            data[cur] < threshold &&
-            data[cur + 1] < threshold &&
-            data[cur + 2] < threshold
-          ) {
+        if (pr < threshold && pg < threshold && pb < threshold) {
+          // Dark border: skip it, then break so the outer while starts the next rectangle.
+          while (x < width) {
+            const bc = (y * width + x) * 4;
+            if (
+              data[bc] >= threshold ||
+              data[bc + 1] >= threshold ||
+              data[bc + 2] >= threshold
+            )
+              break;
             x++;
-            cur = (y * width + x) * 4;
           }
           break;
         }
+
+        segR.push(pr);
+        segG.push(pg);
+        x++;
       }
 
+      if (segR.length > 0) {
+        const avgR = trimmedMean(segR, 0.1);
+        const avgG = trimmedMean(segG, 0.1);
+        if (avgR > avgG) rectangleColors.push(0);
+        else if (avgG > avgR) rectangleColors.push(1);
+      }
+
+      // Advance y to skip the rest of this row band and the border below it.
       if (x >= width) {
         x = 0;
         while (
           y < height &&
-          (data[cur] >= threshold ||
-            data[cur + 1] >= threshold ||
-            data[cur + 2] >= threshold)
+          (data[(y * width + x) * 4] >= threshold ||
+            data[(y * width + x) * 4 + 1] >= threshold ||
+            data[(y * width + x) * 4 + 2] >= threshold)
         ) {
           y++;
-          cur = (y * width + x) * 4;
           if (y >= height) break;
           if (
-            data[cur] < threshold &&
-            data[cur + 1] < threshold &&
-            data[cur + 2] < threshold
+            data[(y * width + x) * 4] < threshold &&
+            data[(y * width + x) * 4 + 1] < threshold &&
+            data[(y * width + x) * 4 + 2] < threshold
           ) {
             while (
               y < height &&
-              data[cur] < threshold &&
-              data[cur + 1] < threshold &&
-              data[cur + 2] < threshold
+              data[(y * width + x) * 4] < threshold &&
+              data[(y * width + x) * 4 + 1] < threshold &&
+              data[(y * width + x) * 4 + 2] < threshold
             ) {
               y++;
-              cur = (y * width + x) * 4;
             }
             break;
           }
