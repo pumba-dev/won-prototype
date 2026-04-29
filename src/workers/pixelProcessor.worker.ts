@@ -175,10 +175,13 @@ function detectCenterColor(
 /**
  * Detecta os retângulos coloridos da grade e retorna os bits codificados.
  *
- * Varre a imagem faixa a faixa (uma linha de retângulos por iteração).
- * Para cada retângulo encontrado, coleta todos os pixels do segmento
- * horizontal e classifica pelo trimmed mean dos canais R e G — elimina
- * outliers sem depender de um único pixel representativo.
+ * Estratégia em duas passagens:
+ * 1. Varre uma coluna central para encontrar o y do meio de cada faixa
+ *    horizontal de retângulos — garante exatamente uma linha representativa
+ *    por faixa, eliminando detecções duplicadas.
+ * 2. Para cada y representativo, varre horizontalmente para detectar os
+ *    segmentos coloridos (um por coluna de retângulos), classificando cada
+ *    um pelo trimmed mean de R e G.
  *
  * @returns `rectangleColors` — array de `0` (vermelho) ou `1` (verde)
  *          na ordem esquerda→direita, cima→baixo, mapeando 1:1 aos bits
@@ -191,82 +194,55 @@ function detectRectangles(
   const { width, height, data } = imageData;
   const rectangleColors: number[] = [];
 
-  for (let y = 0; y < height; y++) {
+  const isBlack = (y: number, x: number): boolean => {
+    const i = (y * width + x) * 4;
+    return data[i] < threshold && data[i + 1] < threshold && data[i + 2] < threshold;
+  };
+
+  // Passagem 1: encontrar o y central de cada faixa horizontal varrendo a coluna do meio.
+  // Se a coluna central cair numa borda vertical, tenta 1/4 e 3/4 da largura como fallback.
+  const candidateXs = [
+    Math.floor(width / 2),
+    Math.floor(width / 4),
+    Math.floor((3 * width) / 4),
+  ];
+
+  let rowMidYs: number[] = [];
+
+  for (const scanX of candidateXs) {
+    const bands: number[] = [];
+    let y = 0;
+    while (y < height) {
+      while (y < height && isBlack(y, scanX)) y++;
+      if (y >= height) break;
+      const bandStart = y;
+      while (y < height && !isBlack(y, scanX)) y++;
+      bands.push(Math.floor((bandStart + y) / 2));
+    }
+    if (bands.length > rowMidYs.length) rowMidYs = bands;
+  }
+
+  // Passagem 2: para cada linha representativa, varrer esquerda→direita detectando segmentos.
+  for (const rowY of rowMidYs) {
     let x = 0;
-
     while (x < width) {
-      const idx = (y * width + x) * 4;
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-
-      if (r < threshold && g < threshold && b < threshold) {
-        x++;
-        continue;
-      }
+      while (x < width && isBlack(rowY, x)) x++;
+      if (x >= width) break;
 
       const segR: number[] = [];
       const segG: number[] = [];
 
-      while (x < width) {
-        const cur = (y * width + x) * 4;
-        const pr = data[cur];
-        const pg = data[cur + 1];
-        const pb = data[cur + 2];
-
-        if (pr < threshold && pg < threshold && pb < threshold) {
-          while (x < width) {
-            const bc = (y * width + x) * 4;
-            if (
-              data[bc] >= threshold ||
-              data[bc + 1] >= threshold ||
-              data[bc + 2] >= threshold
-            )
-              break;
-            x++;
-          }
-          break;
-        }
-
-        segR.push(pr);
-        segG.push(pg);
+      while (x < width && !isBlack(rowY, x)) {
+        const i = (rowY * width + x) * 4;
+        segR.push(data[i]);
+        segG.push(data[i + 1]);
         x++;
       }
 
       if (segR.length > 0) {
         const avgR = trimmedMean(segR, 0.1);
         const avgG = trimmedMean(segG, 0.1);
-        if (avgR > avgG) rectangleColors.push(0);
-        else if (avgG > avgR) rectangleColors.push(1);
-      }
-
-      if (x >= width) {
-        x = 0;
-        while (
-          y < height &&
-          (data[(y * width + x) * 4] >= threshold ||
-            data[(y * width + x) * 4 + 1] >= threshold ||
-            data[(y * width + x) * 4 + 2] >= threshold)
-        ) {
-          y++;
-          if (y >= height) break;
-          if (
-            data[(y * width + x) * 4] < threshold &&
-            data[(y * width + x) * 4 + 1] < threshold &&
-            data[(y * width + x) * 4 + 2] < threshold
-          ) {
-            while (
-              y < height &&
-              data[(y * width + x) * 4] < threshold &&
-              data[(y * width + x) * 4 + 1] < threshold &&
-              data[(y * width + x) * 4 + 2] < threshold
-            ) {
-              y++;
-            }
-            break;
-          }
-        }
-        if (y >= height) break;
+        rectangleColors.push(avgR > avgG ? 0 : 1);
       }
     }
   }
