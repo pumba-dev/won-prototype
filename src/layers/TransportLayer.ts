@@ -26,7 +26,7 @@ export class TransportLayer {
    * para texto legível.
    */
   decode(binaryString: string): string {
-    const bytes = binaryString.match(/.{1,8}/g) ?? [];
+    const bytes = binaryString.match(/.{8}/g) ?? [];
     return bytes
       .map((byte) => String.fromCharCode(parseInt(byte, 2)))
       .join("");
